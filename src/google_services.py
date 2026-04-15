@@ -10,6 +10,7 @@ from google.auth.transport.requests import Request
 
 # The Perfect LPA (Least Privilege Access) Scopes
 SCOPES = [
+    'https://www.googleapis.com/auth/calendar.events',
     'https://www.googleapis.com/auth/calendar.readonly',
     'https://www.googleapis.com/auth/fitness.activity.read',
     'https://www.googleapis.com/auth/tasks',
@@ -124,3 +125,52 @@ class GoogleHealthService:
         except Exception as e:
             print(f"Gmail API Error: {e}")
             return False
+    def deploy_calendar_armor(self):
+        """Scans tomorrow's schedule and blocks recovery time if meeting-heavy."""
+        try:
+            # 1. Get tomorrow's time boundaries
+            now = datetime.datetime.now(datetime.timezone.utc)
+            tomorrow_start = (now + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            tomorrow_end = tomorrow_start + datetime.timedelta(days=1)
+            
+            # 2. Fetch tomorrow's meetings
+            events_result = self.calendar_service.events().list(
+                calendarId='primary', 
+                timeMin=tomorrow_start.isoformat(), 
+                timeMax=tomorrow_end.isoformat(),
+                singleEvents=True, 
+                orderBy='startTime'
+            ).execute()
+            
+            events = events_result.get('items', [])
+            
+            # 3. The Trigger: 3 or more meetings tomorrow = High Burnout Risk
+            if len(events) >= 3: 
+                # Find the end time of the LAST meeting of the day
+                last_event = events[-1]
+                end_str = last_event['end'].get('dateTime', last_event['end'].get('date'))
+                
+                if 'T' in end_str: # Ensure it's not an all-day event
+                    # Calculate a 30-minute Shield Time right after the last meeting
+                    shield_start = end_str
+                    shield_end_dt = datetime.datetime.fromisoformat(end_str.replace('Z', '+00:00')) + datetime.timedelta(minutes=30)
+                    shield_end = shield_end_dt.isoformat()
+                    
+                    # 4. Create the Shield Event
+                    shield_event = {
+                        'summary': '🛡️ Health Guardian: Focus Shield',
+                        'description': 'Automated burnout prevention block. Do not schedule over.',
+                        'start': {'dateTime': shield_start},
+                        'end': {'dateTime': shield_end},
+                        'colorId': '11'  # Red color in Google Calendar
+                    }
+                    
+                    self.calendar_service.events().insert(calendarId='primary', body=shield_event).execute()
+                    print("Calendar Armor Deployed successfully.")
+                    return True, f"Deployed 30-min Focus Shield tomorrow at {shield_start[-14:-9]}."
+            
+            return False, f"Tomorrow looks light ({len(events)} meetings). No armor needed."
+            
+        except Exception as e:
+            print(f"Armor Deployment Failed: {e}")
+            return False, f"Error: {e}"        
