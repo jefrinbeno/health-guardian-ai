@@ -47,10 +47,21 @@ class HealthGuardian:
                     logger.warning(f"Anomaly Detected: {xai_reason}")
                     self._trigger_intervention("stretch_break")
                     
-                    # <-- ADD THIS LINE to write to Google Tasks!
+                    # 1. Write to Tasks
                     self.service.create_health_task() 
                     
-                    return f"🚨 ALERT | {xai_reason} (A reminder has been added to your Google Tasks!)"
+                    # 2. Log to Google Sheets Database
+                    sheet_id = os.getenv("SPREADSHEET_ID")
+                    if sheet_id:
+                        self.service.log_anomaly_to_sheet(sheet_id, xai_reason, activity_minutes)
+                        
+                    # 3. Dispatch Gmail Report
+                    user_email = os.getenv("USER_EMAIL")
+                    if user_email:
+                        email_body = f"Health Guardian Alert.\n\nYour XAI Security model has detected a workflow anomaly.\nReason: {xai_reason}\n\nA break has been scheduled in your Google Tasks. Please step away from the terminal."
+                        self.service.send_health_report(user_email, email_body)
+                    
+                    return f"🚨 ALERT | {xai_reason} (Task scheduled, logged to DB, and Email dispatched!)"
             
             return f"Status: Optimal. Active for {activity_minutes} mins."
             
